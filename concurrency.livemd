@@ -1,0 +1,436 @@
+<!-- livebook:{"persist_outputs":true} -->
+
+# Concurrency in Elixir
+
+```elixir
+Mix.install([
+  {:req, "~> 0.3.11"},
+  {:httpoison, ">= 0.0.0"},
+  {:poison, ">= 0.0.0"}
+])
+```
+
+## Look who's talking
+
+### Anuvrat Parashar
+
+* Programmer turned **Entrepreneur**
+* Personal: https://anuvrat.in
+* Founder, https://essentia.dev
+* Volunteer: in.pycon.org, pydelhi.org
+
+## Concurrency
+
+* What is concurrency?
+* Why are we fascinated with it?
+* How do we go about achieving it?
+
+## Functional Programming
+
+* Functions the way mathematics intended.
+* Perks of a First class citizen.
+* Immutability
+
+## An Elixir Process
+
+* What is an elixir process?
+
+```elixir
+# start a process.
+spawn(fn -> 1 + 2 end)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+#PID<0.509.0>
+```
+
+```elixir
+# everything is a process
+self()
+# prints the PID of the process running the interpreter
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+#PID<0.507.0>
+```
+
+```elixir
+self_pid = self()
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+#PID<0.507.0>
+```
+
+```elixir
+Process.alive?(self_pid)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+true
+```
+
+```elixir
+spawned_pid = spawn(fn -> 1 + 2 end)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+#PID<0.510.0>
+```
+
+```elixir
+Process.alive?(spawned_pid)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+false
+```
+
+```elixir
+send(self(), {:hello, "hasgeek"})
+send(self(), {:hello, "indiafoss"})
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{:hello, "indiafoss"}
+```
+
+```elixir
+receive do
+  {:hello, msg} -> msg
+  {:world, _msg} -> "won't match"
+end
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+"hasgeek"
+```
+
+```elixir
+
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+nil
+```
+
+### Task
+
+```elixir
+# basic example
+task = Task.async(fn -> 2 * 2 end)
+Task.await(task)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+4
+```
+
+```elixir
+Enum.map([1,2,3,4], fn x -> x*2 end)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+[2, 4, 6, 8]
+```
+
+```elixir
+defmodule ConcurrentPrimes do
+  @num_processes 32
+  # @num_processes 8 #number of cores on this machine
+
+  # Calculate primes between 1 and n
+  def calculate(n) when n > 1 do
+    chunk_size = div(n, @num_processes)
+
+    ranges =
+      for i <- 0..(@num_processes - 1), do: {i * chunk_size + 1, min((i + 1) * chunk_size, n)}
+
+    # IO.inspect(ranges)
+    tasks =
+      ranges
+      |> Enum.map(&Task.async(fn -> primes_in_range(&1) end))
+
+    tasks
+    |> Enum.flat_map(&Task.await/1)
+  end
+
+  defp primes_in_range({low, high}) do
+    Enum.filter(low..high, &is_prime?/1)
+  end
+
+  defp is_prime?(2), do: true
+  defp is_prime?(n) when rem(n, 2) == 0, do: false
+
+  defp is_prime?(n) do
+    3
+    |> Stream.iterate(&(&1 + 2))
+    |> Enum.take_while(&(&1 * &1 <= n))
+    |> Enum.all?(fn x -> rem(n, x) != 0 end)
+  end
+end
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{:module, ConcurrentPrimes, <<70, 79, 82, 49, 0, 0, 13, ...>>, {:is_prime?, 1}}
+```
+
+```elixir
+number = 1_000_000
+{time, primes} = :timer.tc(ConcurrentPrimes, :calculate, [number])
+IO.puts("Found #{length(primes)} primes up to #{number} in #{time / 1000} milliseconds")
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+Found 78499 primes up to 1000000 in 713.055 milliseconds
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+:ok
+```
+
+```elixir
+defmodule ConcurrentJokesFetcher do
+  @joke_url "https://v2.jokeapi.dev/joke/Programming?type=single"
+  @num_jokes 3
+
+  def fetch_jokes_with_time do
+    {time, jokes} = :timer.tc(fn -> fetch_jokes() end)
+    {time, jokes}
+  end
+
+  def fetch_jokes do
+    # Start tasks to fetch jokes concurrently
+    tasks =
+      1..@num_jokes
+      |> Enum.map(fn _ -> Task.async(fn -> fetch_joke() end) end)
+
+    # Await results and extract joke strings
+    jokes =
+      tasks
+      |> Enum.map(&Task.await/1)
+      |> Enum.map(fn %{"joke" => joke} -> joke end)
+
+    jokes
+  end
+
+  defp fetch_joke do
+    {:ok, %HTTPoison.Response{body: body}} = HTTPoison.get(@joke_url)
+    Poison.decode!(body)
+  end
+end
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{:module, ConcurrentJokesFetcher, <<70, 79, 82, 49, 0, 0, 11, ...>>, {:fetch_joke, 0}}
+```
+
+```elixir
+{time, jokes} = ConcurrentJokesFetcher.fetch_jokes_with_time()
+IO.puts("Time taken: #{time / 1_000} milliseconds")
+IO.puts(Enum.join(jokes, "\n\n"))
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+Time taken: 1314.404 milliseconds
+Judge: "I sentence you to the maximum punishment..."
+Me (thinking): "Please be death, please be death..."
+Judge: "Learn Java!"
+Me: "Damn."
+
+Eight bytes walk into a bar.
+The bartender asks, "Can I get you anything?"
+"Yeah," reply the bytes.
+"Make us a double."
+
+Four engineers get into a car. The car won't start.
+The Mechanical engineer says "It's a broken starter".
+The Electrical engineer says "Dead battery".
+The Chemical engineer says "Impurities in the gasoline".
+The IT engineer says "Hey guys, I have an idea: How about we all get out of the car and get back in".
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+:ok
+```
+
+## GenServers
+
+### functions
+
+* call
+* cast
+* start_link
+* stop
+* info
+
+### callbacks
+
+* handle_call
+* handle_cast
+* handle_info
+
+## genserver demo: the uptime monitor
+
+```elixir
+defmodule Uptime do
+  use GenServer
+
+  def init(state) do
+    # schedule_work
+    {:ok, state}
+  end
+
+  # client side
+  def start_link(_opts) do
+    GenServer.start_link(__MODULE__, %{})
+  end
+
+  def add_url(pid, url) do
+    GenServer.cast(pid, {:add, url})
+  end
+
+  def get_dump(pid) do
+    GenServer.call(pid, :dump)
+  end
+
+  def stop(pid) do
+    GenServer.cast(pid, :kill_me_please)
+  end
+
+  # server side
+  def handle_cast({:add, url}, state) do
+    schedule_poll(url)
+    {:noreply, Map.put(state, url, %{})}
+  end
+
+  def handle_info({:poll, url}, state) do
+    # IO.inspect("start: #{url}")
+    response = Req.get!(url)
+    # IO.inspect("end: #{url}")
+    schedule_poll(url)
+
+    {:noreply, Map.put(state, url, %{status: response.status, last_seen: DateTime.utc_now()})}
+  end
+
+  def handle_info(:kill_me_please, state) do
+    {:stop, :normal, state}
+  end
+
+  def handle_call(:dump, _from, state) do
+    {:reply, state, state}
+  end
+
+  defp schedule_poll(url) do
+    # In 2 seconds 
+    Process.send_after(self(), {:poll, url}, 2 * 1000)
+  end
+end
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{:module, Uptime, <<70, 79, 82, 49, 0, 0, 18, ...>>, {:schedule_poll, 1}}
+```
+
+```elixir
+{:ok, pid} = Uptime.start_link(1)
+url_anuvrat = "https://anuvrat.in"
+url_essentia = "https://essentia.dev"
+url_hasgeek = "https://hasgeek.com"
+
+Uptime.add_url(pid, url_anuvrat)
+Uptime.add_url(pid, url_essentia)
+Uptime.add_url(pid, url_hasgeek)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+:ok
+```
+
+```elixir
+Uptime.add_url(pid, "https://google.com")
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+:ok
+```
+
+```elixir
+Uptime.get_dump(pid)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+%{
+  "https://anuvrat.in" => %{},
+  "https://essentia.dev" => %{},
+  "https://google.com" => %{},
+  "https://hasgeek.com" => %{}
+}
+```
+
+```elixir
+# kill uptimer
+GenServer.stop(pid)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+:ok
+```
+
+## Thank you
+
+```elixir
+3
+|> Stream.iterate(&(&1 + 2))
+
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+#Function<65.105594673/2 in Stream.unfold/2>
+```
